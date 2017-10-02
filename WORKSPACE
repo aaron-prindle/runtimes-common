@@ -38,7 +38,7 @@ git_repository(
 
 git_repository(
     name = "containerregistry",
-    commit = "b0278a1544238d03648861b6d9395414d4c958e5",
+    commit = "b7c9251893e78cf4cbbcaf882d450f91a6dbc824",
     remote = "https://github.com/google/containerregistry",
 )
 
@@ -90,3 +90,26 @@ docker_pull(
     registry = "gcr.io",
     repository = "google-appengine/nodejs",
 )
+
+git_repository(
+    name = "io_bazel_rules_python",
+    commit = "d6fbb0fb2a5c8e318dd4de5104dc41358cefaa90",
+    remote = "https://github.com/bazelbuild/rules_python.git",
+)
+
+load(
+    "@io_bazel_rules_python//python:pip.bzl",
+    "pip_import",
+    "pip_repositories",
+)
+
+pip_repositories()
+
+pip_import(
+    name = "pip_containerregistry",
+    requirements = "//:requirements.txt",
+)
+
+load("@pip_containerregistry//:requirements.bzl", "pip_install")
+
+pip_install()

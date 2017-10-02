@@ -94,6 +94,5 @@ class Node(builder.JustApp):
             cache.Store(base_image, _NODE_NAMESPACE, checksum, dep_image)
             return dep_image
 
-
 def From(ctx):
     return Node(ctx)

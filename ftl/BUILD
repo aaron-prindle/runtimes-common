@@ -48,6 +48,42 @@ py_test(
     ],
 )
 
+py_test(
+    name = "node_builder_test",
+    srcs = ["node/builder_test.py"],
+    main = "node/builder_test.py",
+    deps = [
+        ":node_lib",
+        "@mock//:mock",
+    ],
+    data = [
+        ":node/testdata/base_image/config_file",
+        ":node/testdata/node_app/app.js",
+        ":node/testdata/node_app/package.json",
+        ":node/testdata/base_image/fast/000.tar.gz",
+        ":node/testdata/base_image/fast/001.tar.gz",
+        ":node/testdata/base_image/fast/002.tar.gz",
+        ":node/testdata/base_image/fast/003.tar.gz",
+        ":node/testdata/base_image/fast/004.tar.gz",
+        ":node/testdata/base_image/fast/005.tar.gz",
+        ":node/testdata/base_image/fast/006.tar.gz",
+        ":node/testdata/base_image/fast/007.tar.gz",
+        ":node/testdata/base_image/fast/008.tar.gz",
+        ":node/testdata/base_image/fast/009.tar.gz",
+        ":node/testdata/base_image/fast/000.sha256",
+        ":node/testdata/base_image/fast/001.sha256",
+        ":node/testdata/base_image/fast/002.sha256",
+        ":node/testdata/base_image/fast/003.sha256",
+        ":node/testdata/base_image/fast/004.sha256",
+        ":node/testdata/base_image/fast/005.sha256",
+        ":node/testdata/base_image/fast/006.sha256",
+        ":node/testdata/base_image/fast/007.sha256",
+        ":node/testdata/base_image/fast/008.sha256",
+        ":node/testdata/base_image/fast/009.sha256",
+
+    ]
+)
+
 py_library(
     name = "node_lib",
     srcs = glob(["node/*.py"]),
