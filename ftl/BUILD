@@ -87,7 +87,7 @@ py_binary(
 py_image(
     name = "node_builder_image",
     srcs = [":node_lib"],
-    base = ":node_builder_base",
+    base = ":node_builder_base", # TODO(aaron-prindle) should be ubuntu_build
     main = "node/main.py",
     deps = [
         "@containerregistry",
