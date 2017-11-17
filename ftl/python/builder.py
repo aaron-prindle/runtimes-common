@@ -84,10 +84,15 @@ class Python(builder.JustApp):
         my_env = os.environ.copy()
         my_env.pop('PYTHONPATH', None)
 
+        dirpath = tempfile.mkdtemp()
+        fnull = open(os.devnull, 'w') # or verbose?
+        # TODO(aaron-prindle) figure out where to put wheels, installs at . rn
         subprocess.check_call(
-            ['pip', 'install', '-r', 'requirements.txt'],
-            cwd=tmp_app,
-            env=my_env)
+            ['pip', 'wheel'] +
+            ['-w', dirpath] +
+            ['-r', "/dev/stdin"],
+            stdout=fnull, stderr=fnull,
+            stdin="Flask==0.12.0")
         logging.info('Finished pip install.')
 
         logging.info('Starting to tar pip packages...')
