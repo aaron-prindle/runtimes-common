@@ -33,6 +33,7 @@ class Python(builder.JustApp):
     def __init__(self, ctx):
         self.descriptor_files = [_REQUIREMENTS_TXT]
         self.namespace = _PYTHON_NAMESPACE
+        self.ctx = ctx
         super(Python, self).__init__(ctx)
 
     def __enter__(self):
@@ -43,11 +44,16 @@ class Python(builder.JustApp):
         return metadata.Overrides(
             creation_time=str(datetime.date.today()) + "T00:00:00Z")
 
-    def CreatePackageBase(self, base_image, cache):
+    def CreatePackageBase(self, base_image, pkg_txt=None):
         """Override."""
         overrides = self._generate_overrides()
 
+        whls = self._resolve_whls()
+        layers = ([whl_to_fslayer(whl) for whl in whls] +
+              [app_layer(args)])
+
         layer, sha = self._gen_package_tar()
+
         logging.info('Generated layer with sha: %s', sha)
 
         with append.Layer(
@@ -55,41 +61,8 @@ class Python(builder.JustApp):
                 overrides=overrides) as dep_image:
             return dep_image
 
-    def _gen_package_tar(self):
-        tmp_app = tempfile.mkdtemp()
-        tmp_venv = tempfile.mkdtemp()
-
-        tmp_app = os.path.join(tmp_app, 'app')
-        venv_dir = os.path.join(tmp_venv, 'env')
-        os.makedirs(tmp_app)
-        os.makedirs(venv_dir)
-
-        # Copy out the relevant package descriptors to a tempdir.
-        for f in self.descriptor_files:
-            # if self._ctx.Contains(f):
-            with open(os.path.join(tmp_app, f), 'w') as w:
-                w.write(self._ctx.GetFile(f))
-
+    def _gen_package_tar(self, whl):
         tar_path = tempfile.mktemp()
-        logging.info('Starting venv creation ...')
-
-        # TODO(aaron-prindle) add support for different python versions
-        subprocess.check_call(
-            ['virtualenv', '--no-download', venv_dir, '-p', 'python3.6'],
-            cwd=tmp_app)
-        os.environ['VIRTUAL_ENV'] = venv_dir
-        os.environ['PATH'] = venv_dir + "/bin" + ":" + os.environ['PATH']
-        # bazel adds its own PYTHONPATH to the env
-        # which must be removed for the pip calls to work properly
-        my_env = os.environ.copy()
-        my_env.pop('PYTHONPATH', None)
-
-        subprocess.check_call(
-            ['pip', 'install', '-r', 'requirements.txt'],
-            cwd=tmp_app,
-            env=my_env)
-        logging.info('Finished pip install.')
-
         logging.info('Starting to tar pip packages...')
         subprocess.check_call(['tar', '-C', tmp_venv, '-cf', tar_path, '.'])
         logging.info('Finished generating tarfile for pip packages...')
@@ -104,6 +77,54 @@ class Python(builder.JustApp):
         logging.info('Finished generating gzip pip package tarfile.')
         return open(os.path.join(tmp_venv, tar_path + '.gz'), 'rb').read(), sha
 
+
+    def _resolve_whls(self, pkg_txt):
+        tmp_venv = tempfile.mkdtemp()
+
+        venv_dir = os.path.join(tmp_venv, 'env')
+        wheel_dir = os.path.join(tmp_venv, 'env', 'wheel')
+        os.makedirs(tmp_app)
+        os.makedirs(wheel_dir)
+
+        # Copy out the relevant package descriptors to a tempdir.
+        for f in self.descriptor_files:
+            # if self._ctx.Contains(f):
+            with open(os.path.join(tmp_app, f), 'w') as w:
+                w.write(self._ctx.GetFile(f))
+
+        logging.info('Starting venv creation ...')
+        # TODO(aaron-prindle) add support for different python versions
+        if not os.path.exists(venv_dir)
+        subprocess.check_call(
+            ['virtualenv', '--no-download', venv_dir, '-p', 'python3.6'],
+            cwd=tmp_app)
+        os.environ['VIRTUAL_ENV'] = venv_dir
+        os.environ['PATH'] = venv_dir + "/bin" + ":" + os.environ['PATH']
+        # bazel adds its own PYTHONPATH to the env
+        # which must be removed for the pip calls to work properly
+        my_env = os.environ.copy()
+        my_env.pop('PYTHONPATH', None)
+
+        args = ['pip', 'wheel',
+            '-w', wheel_dir,
+            '-r', "/dev/stdin"]
+
+        logging.info("pip requirements input: " + pkg_txt)
+        pipe1 = subprocess.Popen(args,
+                                stdin=subprocess.PIPE,
+                                stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE,
+                                env=my_env,
+                                cwd=tmp_app)
+        result = pipe1.communicate(input=pkg_txt)[0]
+        logging.info("pip output: " + str(result))
+        logging.info('Finished pip install.')
+        return [os.path.join(wheel_dir, f) for f in os.listdir(wheel_dir)]
+        # self._cleanup()
+        # return open(os.path.join(tmp_venv, tar_path + '.gz'), 'rb').read(), sha
+
+    def _cleanup(self):
+        subprocess.check_call(['rm', '-rf', '/env/wheel'])
 
 def From(ctx):
     return Python(ctx)
