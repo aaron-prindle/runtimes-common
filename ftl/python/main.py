@@ -27,7 +27,8 @@ from ftl.python import builder as python_builder
 parser = args.base_parser()
 python_parser = argparse.ArgumentParser(
     add_help=False,
-    parents=[parser], description='Construct python images from source.')
+    parents=[parser],
+    description='Construct python images from source.')
 args.extra_args(python_parser, args.python_flgs)
 
 # Version string used to bust caches.

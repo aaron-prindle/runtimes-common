@@ -12,17 +12,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import json
-import os
 import unittest
-import shutil
 import tempfile
 import datetime
-
-from containerregistry.client.v2_2 import docker_image
+import mock
 
 from ftl.common import context
-from ftl.common import test_util
 from ftl.python import builder
 
 _REQUIREMENTS_TXT = """
@@ -47,46 +42,32 @@ if __name__ == "__main__":
 
 
 class PythonTest(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        current_dir = os.path.dirname(__file__)
-        cls.base_image = test_util.TarDockerImage(
-            os.path.join(current_dir, "testdata/base_image/config_file"),
-            os.path.join(
-                current_dir,
-                "testdata/base_image/distroless-python2.7-latest.tar.gz"))
-
     def setUp(self):
-        self._tmpdir = tempfile.mkdtemp()
-        self.cache = test_util.MockHybridRegistry(
-            'fake.gcr.io/google-appengine', self._tmpdir)
         self.ctx = context.Memory()
         self.ctx.AddFile("app.py", _APP)
-        self.ctx.AddFile('requirements.txt', _REQUIREMENTS_TXT)
-        self.test_case = test_util.BuilderTestCase(builder.Python, self.ctx,
-                                                   self.cache, self.base_image)
+        self.builder = builder.From(self.ctx)
+        self.builder._pip_install = mock.Mock()
+        self.builder._get_pkg_dirs = mock.Mock()
+        self.builder._get_pkg_dirs.return_value = \
+            [tempfile.mkdtemp()]
 
-    def tearDown(self):
-        shutil.rmtree(self._tmpdir)
+        # Mock out the calls to package managers for speed.
+        self.builder.PackageLayer._gen_package_tar = mock.Mock()
+        self.builder.PackageLayer._gen_package_tar.return_value = ('layer',
+                                                                   'sha')
 
-    def test_create_package_base_image(self):
-        # check that image was added to the cache
-        self.assertIsInstance(self.test_case.CreatePackageBase(),
-                              docker_image.DockerImage)
+    def test_build_interpreter_layer_ttl_written(self):
+        lyr_generator = self.builder.PackageLayerInit(_REQUIREMENTS_TXT)
+        # the first layer from python is a cachechecklayer
+        lyr_generator.next()
+        _, _, overrides = lyr_generator.next().BuildLayer()
 
-    def test_create_package_base_ttl_written(self):
-        base = self.test_case.CreatePackageBase()
-        self.assertNotEqual(_creation_time(base), "1970-01-01T00:00:00Z")
-        last_created = _timestamp_to_time(_creation_time(base))
+        self.assertNotEqual(overrides.creation_time, "1970-01-01T00:00:00Z")
+        last_created = _timestamp_to_time(overrides.creation_time)
         now = datetime.datetime.now()
         self.assertTrue(last_created > now - datetime.timedelta(days=2))
 
     # TODO(aaron-prindle) add test to check expired/unexpired logic for TTL
-
-
-def _creation_time(image):
-    cfg = json.loads(image.config_file())
-    return cfg.get('created')
 
 
 def _timestamp_to_time(dt_str):

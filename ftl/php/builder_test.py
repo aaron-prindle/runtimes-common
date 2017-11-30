@@ -15,10 +15,8 @@
 import json
 import os
 import unittest
-import shutil
 import tempfile
-
-from containerregistry.client.v2_2 import docker_image
+import mock
 
 from ftl.common import context
 from ftl.common import test_util
@@ -76,20 +74,24 @@ class PHPTest(unittest.TestCase):
 
     def setUp(self):
         self._tmpdir = tempfile.mkdtemp()
-        self.cache = test_util.MockHybridRegistry(
-            'fake.gcr.io/google-appengine', self._tmpdir)
         self.ctx = context.Memory()
         self.ctx.AddFile("app.php", _APP)
-        self.ctx.AddFile('composer.json', _COMPOSER_JSON_TEXT)
-        self.test_case = test_util.BuilderTestCase(builder.PHP, self.ctx,
-                                                   self.cache, self.base_image)
+        self.builder = builder.From(self.ctx)
 
-    def tearDown(self):
-        shutil.rmtree(self._tmpdir)
+        # Mock out the calls to package managers for speed.
+        self.builder.PackageLayer._gen_package_tar = mock.Mock()
+        self.builder.PackageLayer._gen_package_tar.return_value = ('layer',
+                                                                   'sha')
 
-    def test_create_package_base_image(self):
-        self.assertIsInstance(self.test_case.CreatePackageBase(),
-                              docker_image.DockerImage)
+    def test_create_package_base_no_descriptor(self):
+        self.assertFalse(self.ctx.Contains('composer.json'))
+        self.assertFalse(self.ctx.Contains('composer-lock.json'))
+
+        layer, sha, overrides = self.builder.PackageLayer(
+            self.builder._ctx, None,
+            self.builder.descriptor_files, "/app").BuildLayer()
+
+        self.assertIsInstance(layer, str)
 
 
 if __name__ == '__main__':

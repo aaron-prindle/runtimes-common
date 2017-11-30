@@ -46,3 +46,23 @@ def zip_dir_to_layer_sha(pkg_dir):
     with Timing("gzip_runtime_tar"):
         subprocess.check_call(['gzip', tar_path, '-1'])
     return open(os.path.join(pkg_dir, tar_path + '.gz'), 'rb').read(), sha
+
+
+def descriptor_parser(descriptor_files, ctx):
+    descriptor = None
+    for f in descriptor_files:
+        if ctx.Contains(f):
+            descriptor = f
+            descriptor_contents = ctx.GetFile(descriptor)
+            break
+    if not descriptor:
+        logging.info('No package descriptor found. No packages installed.')
+        return None
+    return descriptor_contents
+
+
+def descriptor_copy(ctx, descriptor_files, app_dir):
+    for f in descriptor_files:
+        if ctx.Contains(f):
+            with open(os.path.join(app_dir, f), 'w') as w:
+                w.write(ctx.GetFile(f))

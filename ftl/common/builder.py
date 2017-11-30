@@ -20,6 +20,11 @@ import tarfile
 import logging
 import subprocess
 
+from containerregistry.transform.v2_2 import metadata
+
+from ftl.common import ftl_util
+from ftl.common import build_layer
+
 
 class Base(object):
     """Base is an abstract base class representing a container builder.
@@ -34,10 +39,10 @@ class Base(object):
         self._ctx = ctx
 
     @abc.abstractmethod
-    def BuildAppLayer(self):
-        """Synthesizes the application layer from the context.
+    def GetBuilderLayers(self):
+        """Synthesizes all the layers required  from the context.
         Returns:
-          a raw string of the layer's .tar.gz
+          a list of BuildLayers
         """
 
     def __enter__(self):
@@ -54,35 +59,44 @@ class JustApp(Base):
 
     def __init__(self, ctx):
         super(JustApp, self).__init__(ctx)
+        self.app_layer = self.AppLayer(self._ctx)
 
-    def CreatePackageBase(self, base_image):
+    def GetBuilderLayers(self):
         """Override."""
         # JustApp doesn't install anything, it just appends
         # the application layer, so return the base image as
         # our package base.
-        return base_image
+        return
 
-    def BuildAppLayer(self):
-        """Override."""
-        buf = cStringIO.StringIO()
-        logging.info('Starting to generate app layer tarfile from context...')
-        with tarfile.open(fileobj=buf, mode='w') as out:
-            for name in self._ctx.ListFiles():
-                content = self._ctx.GetFile(name)
-                info = tarfile.TarInfo(os.path.join('app', name))
-                info.size = len(content)
-                out.addfile(info, fileobj=cStringIO.StringIO(content))
-        logging.info('Finished generating app layer tarfile from context.')
+    class AppLayer(build_layer.BaseLayer):
+        def __init__(self, ctx):
+            self._ctx = ctx
 
-        tar = buf.getvalue()
-        sha = 'sha256:' + hashlib.sha256(tar).hexdigest()
+        @classmethod
+        def GetCacheKey(self):
+            return None
 
-        logging.info('Starting to gzip app layer tarfile...')
-        gzip_process = subprocess.Popen(
-            ['gzip', '-f'],
-            stdout=subprocess.PIPE,
-            stdin=subprocess.PIPE,
-            stderr=subprocess.PIPE)
-        gz = gzip_process.communicate(input=tar)[0]
-        logging.info('Finished gzipping tarfile.')
-        return gz, sha
+        def BuildLayer(self):
+            """Override."""
+            buf = cStringIO.StringIO()
+            logging.info(
+                'Starting to generate app layer tarfile from context...')
+            with tarfile.open(fileobj=buf, mode='w') as out:
+                for name in self._ctx.ListFiles():
+                    content = self._ctx.GetFile(name)
+                    info = tarfile.TarInfo(os.path.join('app', name))
+                    info.size = len(content)
+                    out.addfile(info, fileobj=cStringIO.StringIO(content))
+            logging.info('Finished generating app layer tarfile from context.')
+
+            tar = buf.getvalue()
+            sha = 'sha256:' + hashlib.sha256(tar).hexdigest()
+
+            with ftl_util.Timing("gzip_app_layer_tar"):
+                gzip_process = subprocess.Popen(
+                    ['gzip', '-f'],
+                    stdout=subprocess.PIPE,
+                    stdin=subprocess.PIPE,
+                    stderr=subprocess.PIPE)
+                gz = gzip_process.communicate(input=tar)[0]
+            return gz, sha, metadata.Overrides()

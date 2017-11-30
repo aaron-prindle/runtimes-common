@@ -16,6 +16,9 @@
 import tarfile
 import json
 import datetime
+import httplib2
+import logging
+
 from containerregistry.client import docker_creds
 from containerregistry.client import docker_name
 from containerregistry.client.v2_2 import append
@@ -24,13 +27,11 @@ from containerregistry.client.v2_2 import docker_session
 from containerregistry.client.v2_2 import save
 from containerregistry.transport import transport_pool
 
-import httplib2
-import logging
-import hashlib
-
 from ftl.common import args as ftl_args
 from ftl.common import cache
 from ftl.common import context
+from ftl.common import ftl_util
+from ftl.common import build_layer
 
 _THREADS = 32
 _DEFAULT_TTL_WEEKS = 1
@@ -40,6 +41,7 @@ class BuilderRunner():
     def __init__(self, args, builder, cache_version_str):
         self.args = args
         self.transport = transport_pool.Http(httplib2.Http, size=_THREADS)
+        self.base = None
         self.base_name = docker_name.Tag(args.base)
         self.base_creds = docker_creds.DefaultKeychain.Resolve(self.base_name)
         self.target_image = docker_name.Tag(args.name)
@@ -53,27 +55,13 @@ class BuilderRunner():
             cache_version=cache_version_str,
             threads=_THREADS,
             mount=[self.base_name])
-        self.builder = builder.From(self.ctx)
-
-    def GetCacheKey(self, descriptor_files):
-        descriptor = None
-        for f in descriptor_files:
-            if self.ctx.Contains(f):
-                descriptor = f
-                descriptor_contents = self.ctx.GetFile(descriptor)
-                break
-        if not descriptor:
-            logging.info('No package descriptor found. No packages installed.')
-            return None
-        return hashlib.sha256(descriptor_contents).hexdigest()
+        extracted = _args_extractor(self.ctx, vars(self.args))
+        self.builder = builder.From(**extracted)
 
     def GetCachedDepsImage(self, checksum):
         if not checksum:
-            # TODO(aaron-prindle) verify this makes sense to use None
-            # as sentinel for no descriptor and to handle this here
-            return self.args.base
-
-        hit = self.cash.Get(self.args.base, self.builder.namespace, checksum)
+            return None
+        hit = self.cash.Get(self.base, self.builder.namespace, checksum)
         if hit:
             logging.info('Found cached dependency layer for %s' % checksum)
             last_created = _timestamp_to_time(_creation_time(hit))
@@ -91,37 +79,46 @@ class BuilderRunner():
     def StoreDepsImage(self, dep_image, checksum):
         if self.args.cache:
             logging.info('Storing layer cash.')
-            self.cash.Store(self.args.base, self.builder.namespace, checksum,
+            self.cash.Store(self.base, self.builder.namespace, checksum,
                             dep_image)
         else:
             logging.info('Skipping storing layer cash.')
 
     def GenerateFTLImage(self):
         with docker_image.FromRegistry(self.base_name, self.base_creds,
-                                       self.transport) as self.args.base:
-
+                                       self.transport) as self.base:
             # Create (or pull from cache) the base image with the
             # package descriptor installation overlaid.
-            logging.info('Generating dependency layer...')
-            checksum = self.GetCacheKey(self.builder.descriptor_files)
-            deps_image = self.GetCachedDepsImage(checksum)
-            if not deps_image:
-                # TODO(aaron-prindle) make this better, prob pass args to bldr
-                extracted = _args_extractor(vars(self.args))
-                deps_image = self.builder.CreatePackageBase(**extracted)
-                self.StoreDepsImage(deps_image, checksum)
-            # Construct the application layer from the context.
-            logging.info('Generating app layer...')
-            app_layer, diff_id = self.builder.BuildAppLayer()
-            with append.Layer(
-                    deps_image, app_layer, diff_id=diff_id) as app_image:
-                if self.args.output_path:
+            ftl_image = self.base
+            lyrs = self.builder.GetBuildLayers()
+            for lyr in lyrs:
+                key = lyr.GetCacheKey()
+                cached_img = self.GetCachedDepsImage(key)
+                if cached_img:
+                    ftl_image = cached_img
+                    if isinstance(lyr, build_layer.CacheCheckLayer):
+                        cached_img.was_cached = True
+                    break
+
+                if not isinstance(lyr, build_layer.CacheCheckLayer):
+                    built_layer, diff_id, overrides = \
+                        lyr.BuildLayer()
+                    ftl_image = append.Layer(
+                        ftl_image,
+                        built_layer,
+                        diff_id=diff_id,
+                        overrides=overrides)
+                    self.StoreDepsImage(ftl_image, key)
+
+            if self.args.output_path:
+                with ftl_util.Timing("saving_tarball_image"):
                     with tarfile.open(
                             name=self.args.output_path, mode='w') as tar:
-                        save.tarball(self.target_image, app_image, tar)
+                        save.tarball(self.target_image, ftl_image, tar)
                     logging.info("{0} tarball located at {1}".format(
                         str(self.target_image), self.args.output_path))
-                    return
+                return
+            with ftl_util.Timing("pushing_image_to_docker_registry"):
                 with docker_session.Push(
                         self.target_image,
                         self.target_creds,
@@ -129,7 +126,8 @@ class BuilderRunner():
                         threads=_THREADS,
                         mount=[self.base_name]) as session:
                     logging.info('Pushing final image...')
-                    session.upload(app_image)
+                    session.upload(ftl_image)
+                return
 
 
 def _creation_time(image):
@@ -143,9 +141,9 @@ def _timestamp_to_time(dt_str):
     return datetime.datetime.strptime(dt, "%Y-%m-%dT%H:%M:%S")
 
 
-def _args_extractor(args):
+def _args_extractor(ctx, args):
     extracted = {}
-    extracted['base'] = args['base']
+    extracted['ctx'] = ctx
     for flg in ftl_args.node_flgs + ftl_args.php_flgs + ftl_args.python_flgs:
         if flg in args and args[flg] is not None:
             extracted[flg] = args[flg]
