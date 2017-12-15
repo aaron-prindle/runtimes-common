@@ -25,18 +25,6 @@ from containerregistry.client.v2_2 import docker_http
 from containerregistry.transform.v2_2 import metadata as v2_2_metadata
 
 
-def ExtractValue(value):
-    """Return the contents of a file point to by value if it starts with an @.
-    Args:
-    value: The possible filename to extract or a string.
-    Returns:
-    The content of the file if value starts with an @, or the passed value.
-    """
-    if value.startswith('@'):
-        with open(value[1:], 'r') as f:
-          value = f.read()
-    return value
-
 class TarDockerImage(docker_image.DockerImage):
     """Interface for implementations that interact with Docker images."""
     def __init__(self, blob):
@@ -81,11 +69,11 @@ class TarDockerImage(docker_image.DockerImage):
         config = json.loads(self.config_file())
         content = self.config_file().encode('utf-8')
 
-        layer_hash = hashlib.sha256(self.blob("")).hexdigest()
+        layer_hash = hashlib.sha256(self.uncompressed_blob("")).hexdigest()
 
         # is the diff_id the sha of the uncompressed blob of a layer?
-        diff_id = 'sha256:' + ExtractValue(layer_hash)  # (diffid_filename)
-        blob_sum = 'sha256:' + ExtractValue(layer_hash)  # (diffid_filename)
+        diff_id = 'sha256:' + layer_hash  # (diffid_filename)
+        blob_sum = 'sha256:' + layer_hash  # (diffid_filename)
 
         diffid_to_blobsum = {}
         diffid_to_blobsum[diff_id] = blob_sum
@@ -102,12 +90,8 @@ class TarDockerImage(docker_image.DockerImage):
                 {
                     'mediaType': docker_http.LAYER_MIME,
                     'size': self.blob_size(""),
-                    # THIS IS WRONG, CHANGE, ERROR
-                    # vvvvvvvvvvvvvvvvvvvvvvvvvvv
-                    'digest': diffid_to_blobsum[diff_id]
-                    # 'digest': blob_sum,
+                    'digest': diffid_to_blobsum[diff_id] # digest
                 }
-                # for _ in range(1)
                 for diff_id in config['rootfs']['diff_ids']
             ]
         }, sort_keys=True)
@@ -115,18 +99,15 @@ class TarDockerImage(docker_image.DockerImage):
     def config_file(self):
         """The raw blob string of the config file."""
         # layer = "Layer sha256 hashes that make up this image"
-        arg_layer = [hashlib.sha256(self.blob("")).hexdigest()]
-        blob_sum = 'sha256:' + ExtractValue(arg_layer[0])  # (diffid_filename)
-
-        stamp_info_file = None
+        arg_layer = [hashlib.sha256(self.uncompressed_blob("")).hexdigest()]
+        blob_sum = 'sha256:' + arg_layer[0]  # (diffid_filename)
         _PROCESSOR_ARCHITECTURE = 'amd64'
         _OPERATING_SYSTEM = 'linux'
 
         data = json.loads('{}')
-
         layers = []
         for layer in arg_layer:
-            layers.append(ExtractValue(layer))
+            layers.append(layer)
 
         output = v2_2_metadata.Override(data, v2_2_metadata.Overrides(
             author='Bazel', created_by='bazel build ...',
@@ -137,7 +118,12 @@ class TarDockerImage(docker_image.DockerImage):
         # THIS IS WRONG, CHANGE, ERROR
         # NEEDS TO MATCH
         # sha256:d328f49ef4532c300e5cec2968b1ac14c7927a9e034ffae9f262323dc0b53ac9
+        # ^^ from v2_2/save.py:93-94
         # vvvvvvvvvvvvvvvvvvvvvvvvvvv
+
+        # NEW ERROR
+        # 'digest' parameter 'sha256:d328f49ef4532c300e5cec2968b1ac14c7927a9e034ffae9f262323dc0b53ac9' does not matc
+        # h computed digest 'sha256:a93e09c8b2a785736b2023e32054c42b9e0be248022f7b9d005811b883d9bfc1'.: None
 
         output['rootfs'] = {'diff_ids': [blob_sum]}
 
