@@ -32,6 +32,8 @@ from ftl.common import cache
 from ftl.common import context
 from ftl.common import ftl_util
 from ftl.common import build_layer
+from ftl.common import tar_to_dockerimage
+from ftl.node import builder as node_builder
 
 _THREADS = 32
 _DEFAULT_TTL_WEEKS = 1
@@ -89,32 +91,36 @@ class BuilderRunner():
                                        self.transport) as self.base:
             # Create (or pull from cache) the base image with the
             # package descriptor installation overlaid.
-            ftl_image = self.base
-            lyrs = self.builder.GetBuildLayers()
-            for lyr in lyrs:
-                key = lyr.GetCacheKey()
-                cached_img = self.GetCachedDepsImage(key)
-                if cached_img:
-                    ftl_image = cached_img
-                    if isinstance(lyr, build_layer.CacheCheckLayer):
-                        cached_img.was_cached = True
-                    break
+            # ftl_image = self.base
+            # ftl_image = single_layer_image
+            lyr = self.builder.GetBuildLayers()
+            lyr_gz, sha, overrides = lyr.BuildLayer()
+            single_layer_image = tar_to_dockerimage.TarDockerImage(lyr_gz)
 
-                if not isinstance(lyr, build_layer.CacheCheckLayer):
-                    built_layer, diff_id, overrides = \
-                        lyr.BuildLayer()
-                    ftl_image = append.Layer(
-                        ftl_image,
-                        built_layer,
-                        diff_id=diff_id,
-                        overrides=overrides)
-                    self.StoreDepsImage(ftl_image, key)
+            # for lyr in lyrs:
+            #     key = lyr.GetCacheKey()
+            #     cached_img = self.GetCachedDepsImage(key)
+            #     if cached_img:
+            #         ftl_image = cached_img
+            #         if isinstance(lyr, build_layer.CacheCheckLayer):
+            #             cached_img.was_cached = True
+            #         break
+
+            #     if not isinstance(lyr, build_layer.CacheCheckLayer):
+            #         built_layer, diff_id, overrides = \
+            #             lyr.BuildLayer()
+            #         ftl_image = append.Layer(
+            #             ftl_image,
+            #             built_layer,
+            #             diff_id=diff_id,
+            #             overrides=overrides)
+            #         self.StoreDepsImage(ftl_image, key)
 
             if self.args.output_path:
                 with ftl_util.Timing("saving_tarball_image"):
                     with tarfile.open(
                             name=self.args.output_path, mode='w') as tar:
-                        save.tarball(self.target_image, ftl_image, tar)
+                        save.tarball(self.target_image, single_layer_image, tar)
                     logging.info("{0} tarball located at {1}".format(
                         str(self.target_image), self.args.output_path))
                 return
@@ -126,7 +132,7 @@ class BuilderRunner():
                         threads=_THREADS,
                         mount=[self.base_name]) as session:
                     logging.info('Pushing final image...')
-                    session.upload(ftl_image)
+                    session.upload(single_layer_image)
                 return
 
 

@@ -46,16 +46,17 @@ class Node(builder.JustApp):
         return self
 
     def GetBuildLayers(self):
-        descriptor_contents = ftl_util.descriptor_parser(
-            self.descriptor_files, self._ctx)
-        if descriptor_contents is None:
-            return [self.app_layer]
-        builder_lyrs = [
-            self.PackageLayer(self._ctx, None, self.descriptor_files,
-                              self.destination_path)
-        ]
-        builder_lyrs.append(self.app_layer)
-        return builder_lyrs
+        return self.app_layer
+        # descriptor_contents = ftl_util.descriptor_parser(
+        #     self.descriptor_files, self._ctx)
+        # if descriptor_contents is None:
+        #     return [self.app_layer]
+        # builder_lyrs = [
+        #     self.PackageLayer(self._ctx, None, self.descriptor_files,
+        #                       self.destination_path)
+        # ]
+        # builder_lyrs.append(self.app_layer)
+        # return builder_lyrs
 
     class PackageLayer(build_layer.BaseLayer):
         def __init__(self, ctx, pkg_txt, descriptor_files, destination_path):
