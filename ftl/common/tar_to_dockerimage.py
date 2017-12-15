@@ -25,23 +25,12 @@ from containerregistry.client.v2_2 import docker_http
 from containerregistry.transform.v2_2 import metadata as v2_2_metadata
 
 
-def ExtractValue(value):
-    """Return the contents of a file point to by value if it starts with an @.
-    Args:
-    value: The possible filename to extract or a string.
-    Returns:
-    The content of the file if value starts with an @, or the passed value.
-    """
-    if value.startswith('@'):
-        with open(value[1:], 'r') as f:
-          value = f.read()
-    return value
-
 class TarDockerImage(docker_image.DockerImage):
     """Interface for implementations that interact with Docker images."""
     def __init__(self, blob):
         #   self._uncompressed_blob = uncompressed_blob
           self._blob = blob
+          self._config_digest = None
 
     def fs_layers(self):
         """The ordered collection of filesystem layers that comprise this image."""
@@ -78,75 +67,45 @@ class TarDockerImage(docker_image.DockerImage):
         Returns:
           The raw json manifest
         """
-        config = json.loads(self.config_file())
         content = self.config_file().encode('utf-8')
-
-        layer_hash = hashlib.sha256(self.blob("")).hexdigest()
-
-        # is the diff_id the sha of the uncompressed blob of a layer?
-        diff_id = 'sha256:' + ExtractValue(layer_hash)  # (diffid_filename)
-        blob_sum = 'sha256:' + ExtractValue(layer_hash)  # (diffid_filename)
-
-        diffid_to_blobsum = {}
-        diffid_to_blobsum[diff_id] = blob_sum
-
         return json.dumps({
             'schemaVersion': 2,
             'mediaType': docker_http.MANIFEST_SCHEMA2_MIME,
             'config': {
                 'mediaType': docker_http.CONFIG_JSON_MIME,
                 'size': len(content),
-                'digest': 'sha256:' + hashlib.sha256(content).hexdigest()
+                'digest': docker_digest.SHA256(content)
             },
             'layers': [
                 {
                     'mediaType': docker_http.LAYER_MIME,
                     'size': self.blob_size(""),
-                    # THIS IS WRONG, CHANGE, ERROR
-                    # vvvvvvvvvvvvvvvvvvvvvvvvvvv
-                    'digest': diffid_to_blobsum[diff_id]
-                    # 'digest': blob_sum,
+                    'digest': docker_digest.SHA256(self.blob(""))
                 }
-                # for _ in range(1)
-                for diff_id in config['rootfs']['diff_ids']
             ]
         }, sort_keys=True)
 
     def config_file(self):
         """The raw blob string of the config file."""
-        # layer = "Layer sha256 hashes that make up this image"
-        arg_layer = [hashlib.sha256(self.blob("")).hexdigest()]
-        blob_sum = 'sha256:' + ExtractValue(arg_layer[0])  # (diffid_filename)
-
-        stamp_info_file = None
         _PROCESSOR_ARCHITECTURE = 'amd64'
         _OPERATING_SYSTEM = 'linux'
 
-        data = json.loads('{}')
-
-        layers = []
-        for layer in arg_layer:
-            layers.append(ExtractValue(layer))
-
-        output = v2_2_metadata.Override(data, v2_2_metadata.Overrides(
-            author='Bazel', created_by='bazel build ...',
-            layers=layers,
+        output = v2_2_metadata.Override(json.loads('{}'),
+         v2_2_metadata.Overrides(
+            author='Bazel',
+             created_by='bazel build ...',
+            layers=[docker_digest.SHA256(self.uncompressed_blob(""))],
             ),
             architecture=_PROCESSOR_ARCHITECTURE,
             operating_system=_OPERATING_SYSTEM)
-        # THIS IS WRONG, CHANGE, ERROR
-        # NEEDS TO MATCH
-        # sha256:d328f49ef4532c300e5cec2968b1ac14c7927a9e034ffae9f262323dc0b53ac9
-        # vvvvvvvvvvvvvvvvvvvvvvvvvvv
-
-        output['rootfs'] = {'diff_ids': [blob_sum]}
+        output['rootfs'] = {'diff_ids': [docker_digest.SHA256(self.uncompressed_blob(""))]}
 
         return json.dumps(output, sort_keys=True)
 
 
     def blob_size(self, digest):
         """The byte size of the raw blob."""
-        return len(self.blob(""))
+        return len(self.blob(digest))
 
 
     def blob(self, digest):
@@ -162,7 +121,7 @@ class TarDockerImage(docker_image.DockerImage):
 
     def uncompressed_blob(self, digest):
         """Same as blob() but uncompressed."""
-        zipped = self.blob("")
+        zipped = self.blob(digest)
         buf = cStringIO.StringIO(zipped)
         f = gzip.GzipFile(mode='rb', fileobj=buf)
         unzipped = f.read()
@@ -174,7 +133,7 @@ class TarDockerImage(docker_image.DockerImage):
             return this_digest
         raise ValueError('Unmatched "diff_id": "%s"' % diff_id)
 
-    def layer(self):
+    def layer(self, diff_id):
         """Like `blob()`, but accepts the `diff_id` instead.
 
         The `diff_id` is the name for the digest of the uncompressed layer.
@@ -185,7 +144,7 @@ class TarDockerImage(docker_image.DockerImage):
         Returns:
           The raw compressed blob string of the layer.
         """
-        return self.blob("")
+        return self.blob(self._diff_id_to_digest(diff_id))
 
     def uncompressed_layer(self, diff_id):
         """Same as layer() but uncompressed."""
