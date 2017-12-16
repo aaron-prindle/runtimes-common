@@ -19,6 +19,7 @@ import tempfile
 import logging
 import datetime
 import hashlib
+import json
 
 from containerregistry.transform.v2_2 import metadata
 
@@ -47,9 +48,14 @@ class PHP(builder.JustApp):
             self.descriptor_files, self._ctx)
         if descriptor_contents is None:
             return [self.app_layer]
+        cmpsr_json = json.load(descriptor_contents)
+        pkg_txts = []
+        for pkg,vers in cmpsr_json['require'].iteritems():
+            pkg_txts.append("%s:%s" % pkg, vers)
+        # phase 2 impl
         builder_lyrs = [
-            self.PackageLayer(self._ctx, None, self.descriptor_files,
-                              self.destination_path)
+            self.PackageLayer(self._ctx, pkg_txt, self.descriptor_files,
+                              self.destination_path) for pkg_txt in pkg_txts
         ]
         builder_lyrs.append(self.app_layer)
         return builder_lyrs
@@ -62,10 +68,9 @@ class PHP(builder.JustApp):
             self._destination_path = destination_path
 
         def GetCacheKey(self):
-            descriptor_contents = ftl_util.descriptor_parser(
-                self._descriptor_files, self._ctx)
-
-            return hashlib.sha256(descriptor_contents).hexdigest()
+            # descriptor_contents = ftl_util.descriptor_parser(
+            #     self._descriptor_files, self._ctx)
+            return hashlib.sha256(self._pkg_txt).hexdigest()
 
         def BuildLayer(self):
             """Override."""
@@ -84,27 +89,28 @@ class PHP(builder.JustApp):
             os.makedirs(app_dir)
 
             # Copy out the relevant package descriptors to a tempdir.
-            ftl_util.descriptor_copy(self._ctx, self._descriptor_files,
-                                     app_dir)
+            if pkg_txt is None:
+                ftl_util.descriptor_copy(self._ctx, self._descriptor_files,
+                                        app_dir)
 
             subprocess.check_call(
                 ['rm', '-rf', os.path.join(app_dir, 'vendor')])
 
             with ftl_util.Timing("composer_install"):
-                if pkg_txt is None:
+                if pkg_txt is not None:
                     subprocess.check_call(
                         [
-                            'composer', 'install', '--no-dev',
-                            '--no-scripts'
-                        ],
-                        cwd=app_dir)
-                else:
-                    subprocess.check_call(
-                        [
-                            'composer', 'install', '--no-dev', '--no-scripts',
+                            'composer', 'require', '--no-dev', '--no-scripts',
                             pkg_txt
                         ],
                         cwd=app_dir)
+
+                subprocess.check_call(
+                    [
+                        'composer', 'install', '--no-dev',
+                        '--no-scripts'
+                    ],
+                    cwd=app_dir)
             return ftl_util.zip_dir_to_layer_sha(pkg_dir)
 
         # def _gen_pip_env(self):
