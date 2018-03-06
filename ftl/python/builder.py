@@ -62,7 +62,7 @@ class Python(builder.RuntimeBase):
                     with ftl_util.Timing("uploading interpreter layer"):
                         self._cache.Set(interpreter_builder.GetCacheKey(),
                                         interpreter_builder.GetImage())
-            lyr_imgs.append(interpreter_builder)
+            lyr_imgs.append(interpreter_builder.GetImage())
 
             # check cache or build package layers
             req_txt_builder = package_builder.PackageLayerBuilder(
@@ -92,7 +92,7 @@ class Python(builder.RuntimeBase):
                         interpreter_builder)
                     with ftl_util.Timing("building pkg layer"):
                         layer_builder.BuildLayer()
-                    req_txt_imgs.append(layer_builder)
+                    req_txt_imgs.append(layer_builder.GetImage())
 
                 with ftl_util.Timing("stitching lyrs into req.txt image"):
                     req_txt_image = self.AppendLayersIntoImage(req_txt_imgs)
@@ -102,7 +102,7 @@ class Python(builder.RuntimeBase):
                     with ftl_util.Timing("uploading req.txt image"):
                         self._cache.Set(req_txt_builder.GetCacheKey(),
                                         req_txt_builder.GetImage())
-            lyr_imgs.append(req_txt_builder)
+            lyr_imgs.append(req_txt_builder.GetImage())
 
         app = base_builder.AppLayerBuilder(
             ctx=self._ctx,
@@ -111,7 +111,7 @@ class Python(builder.RuntimeBase):
             exposed_ports=self._args.exposed_ports)
         with ftl_util.Timing("building app layer"):
             app.BuildLayer()
-        lyr_imgs.append(app)
+        lyr_imgs.append(app.GetImage())
         with ftl_util.Timing("stitching lyrs into final image"):
             ftl_image = self.AppendLayersIntoImage(lyr_imgs)
         with ftl_util.Timing("uploading final image"):

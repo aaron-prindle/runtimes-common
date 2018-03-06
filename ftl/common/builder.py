@@ -111,15 +111,11 @@ class RuntimeBase(JustApp):
     def Build(self):
         return
 
-    def AppendLayersIntoImage(self, lyr_imgs):
-        for i, lyr_img in enumerate(lyr_imgs):
+    def AppendLayersIntoImage(self, imgs):
+        for i, img in enumerate(imgs):
             if i == 0:
-                try:
-                    result_image = lyr_img.GetImage()
-                except AttributeError:
-                    result_image = lyr_img
+                result_image = lyr_img
                 continue
-            img = lyr_img.GetImage()
             diff_ids = img.diff_ids()
             for diff_id in diff_ids:
                 lyr = img.blob(img._diff_id_to_digest(diff_id))
