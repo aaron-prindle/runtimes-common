@@ -13,8 +13,10 @@ _BASE_MAP = {
     "python": 'gcr.io/google-appengine/python:latest',
 }
 
+    # "node-same": ['packages_test', 'packages_test', '1'],
+
 _APP_MAP = {
-    "node-same": ['packages_test', 'packages_test', '1'],
+    "node-same": ['jason_test', 'jason_test', '1'],
     "node-plus-one": ['packages_test', 'packages_test_plus_one', '2'],
     "php-lock-plus-one": ['lock_test', 'lock_test_plus_one',
                           '2'],

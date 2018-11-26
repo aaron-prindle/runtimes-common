@@ -15,8 +15,10 @@
 import subprocess
 import os
 import logging
-import httplib2
 import json
+import random
+import string
+import httplib2
 
 from ftl.common import ftl_util
 from ftl.common import constants
@@ -29,6 +31,9 @@ from containerregistry.transport import transport_pool
 
 _THREADS = 32
 
+def randomword(length):
+       letters = string.ascii_lowercase
+       return ''.join(random.choice(letters) for i in range(length))
 
 class Cached():
     def __init__(self, args, runtime):
@@ -54,18 +59,31 @@ class Cached():
             builder_path = 'bazel-bin/ftl/{0}_builder.par'.format(
                 self._runtime)
         lyr_shas = []
+        # random_suffix = randomword(32)
+        random_suffix = randomword(32)
         for label, dir in zip(self._labels, self._dirs):
-            logging.info("label: %s" % label)
-            logging.info("dir: %s" % dir)
-            img_name = ''.join([self._name.split(":")[0], ":", label])
+            logging.info("label: %s", label)
+            logging.info("dir: %s", dir)
+            img_name = "%s:%s" % (self._name.split(":")[0],
+                                     label)
+            # img_name = "%s-%s:%s" % (self._name.split(":")[0],
+            #                          random_suffix,
+            #                          label)
+
+            # img_name = ''.join([self._name.split(":")[0], "-",random_suffix,
+            #                     ":", label])
             ftl_args = [
                 builder_path, '--base', self._base, '--name', img_name,
-                '--directory', dir
+                '--directory', dir,
+                '--cache-repository',
+                'gcr.io/ftl-node-test/ftl-cache-repo-%s' % random_suffix
             ]
             if label == "original":
                 ftl_args.extend(['--no-cache'])
+
+            out = ""
             try:
-                ftl_util.run_command(
+                out = ftl_util.run_command(
                     "cached-ftl-build-%s" % img_name,
                     ftl_args)
                 lyr_shas.append(self._fetch_lyr_shas(img_name))
@@ -73,7 +91,16 @@ class Cached():
                 logging.error(e)
                 exit(1)
             finally:
+                logging.error("cleaning up directories...")
                 self._cleanup(constants.VIRTUALENV_DIR)
+                self._cleanup(os.path.join(dir, constants.PACKAGE_LOCK))
+                self._cleanup(os.path.join(dir, "node_modules"))
+                self._cleanup(os.path.join(dir, "vendor"))
+        if label == "reupload":
+            if "[HIT]" not in out:
+                logging.error("Cache `[HIT]` not found on reupload: %s", out)
+                exit(1)
+
         if len(lyr_shas) is not 2:
             logging.error("Incorrect number of layers to compare")
             exit(1)
